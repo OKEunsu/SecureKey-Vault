@@ -4,13 +4,6 @@ export interface CredentialField {
   type: 'text' | 'password' | 'textarea';
 }
 
-export interface AuthTypeDefinition {
-  id: string;
-  name: string;
-  fields: CredentialField[];
-  example?: string;
-}
-
 export interface CredentialItem {
   id: string;
   serviceName: string;
@@ -22,17 +15,32 @@ export interface CredentialItem {
   expiry?: string; // ISO Date string YYYY-MM-DD
   memo?: string;
   createdAt: string;
+  updatedAt?: string; // Last modified date
+}
+
+export interface AuthTypeField {
+  key: string;
+  label: string;
+  type: 'text' | 'password' | 'textarea';
+}
+
+export interface AuthTypeDefinition {
+  id: string;
+  name: string;
+  fields: AuthTypeField[];
+  example?: string;
+  description?: string;
+}
+
+export interface EncryptedItem {
+  id: string;
+  ciphertext: string; // The entire CredentialItem JSON stringified and encrypted
 }
 
 export interface StoredDatabase {
   verificationHash: string; // SHA256 of the master password to verify correctness
   salt: string;            // Salt for PBKDF2
   items: EncryptedItem[];
-}
-
-export interface EncryptedItem {
-  id: string;
-  ciphertext: string; // The entire CredentialItem JSON stringified and encrypted
 }
 
 export type ThemeMode = 'light' | 'dark';

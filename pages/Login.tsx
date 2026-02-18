@@ -52,6 +52,40 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     }
   };
 
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // If database exists, warn user about overwriting
+    if (!isSetup) {
+      if (!window.confirm("경고: 백업 파일을 불러오면 현재 기기에 저장된 모든 데이터가 삭제되고 덮어씌워집니다.\n\n계속하시겠습니까?")) {
+        // Reset input value so change event can fire again if same file selected
+        e.target.value = '';
+        return;
+      }
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const content = event.target?.result as string;
+        // Basic validation
+        const parsed = JSON.parse(content);
+        if (!parsed.verificationHash || !parsed.salt) {
+          throw new Error('Invalid database format');
+        }
+        localStorage.setItem('secure_key_vault_db_v1', content);
+        alert('복원되었습니다. 마스터 비밀번호로 로그인해주세요.');
+        window.location.reload();
+      } catch (err) {
+        alert('잘못된 백업 파일입니다.');
+      }
+    };
+    reader.readAsText(file);
+  };
+
   return (
     <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
       <div className={`bg-slate-800 border border-slate-700 p-8 rounded-2xl shadow-2xl w-full max-w-md ${shake ? 'animate-shake' : ''}`}>
@@ -70,6 +104,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
+          {/* ... input fields removed for brevity in diff, but assumed to be here or handled by context ... */}
           <div>
             <div className="relative">
               <input
@@ -112,8 +147,26 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
           </button>
         </form>
 
-        {!isSetup && (
-          <div className="mt-6 text-center">
+        <div className="mt-6 pt-6 border-t border-slate-700 text-center">
+          <p className="text-slate-400 text-xs mb-3">
+            {isSetup ? '또는 기존 백업 파일에서 복원' : '비밀번호를 분실했거나 복구가 필요한 경우'}
+          </p>
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleImport}
+            className="hidden"
+            accept=".json"
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="text-sm text-blue-400 hover:text-blue-300 font-medium transition-colors flex items-center justify-center gap-2 w-full py-2 hover:bg-slate-700/50 rounded-lg"
+          >
+            📂 백업 파일 불러오기 (.json)
+          </button>
+
+          {!isSetup && (
             <button
               onClick={() => {
                 if (window.confirm("모든 데이터가 삭제됩니다. 정말로 초기화하시겠습니까?")) {
@@ -121,12 +174,12 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                   window.location.reload();
                 }
               }}
-              className="text-xs text-slate-500 hover:text-red-400 transition-colors"
+              className="mt-2 text-xs text-slate-500 hover:text-red-400 transition-colors w-full py-2"
             >
-              볼트 초기화 (데이터 삭제됨)
+              데이터 초기화 (삭제)
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       <style>{`

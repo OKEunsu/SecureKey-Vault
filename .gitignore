@@ -1,4 +1,4 @@
-# Logs
+﻿# Logs
 logs
 *.log
 npm-debug.log*
@@ -26,4 +26,7 @@ dist-ssr
 # Electron
 dist-electron
 release
-.cache
+.cache*
+
+# TypeScript
+*.tsbuildinfo

@@ -79,11 +79,20 @@ const App: React.FC = () => {
 
   const handleSaveItem = (item: CredentialItem) => {
     try {
+      console.log('Saving item:', item);
       dbService.saveItem(item);
       refreshData();
       showToast('저장되었습니다.', 'success');
-    } catch (e) {
-      showToast('저장에 실패했습니다.', 'error');
+    } catch (e: any) {
+      console.error("Save failed:", e);
+      const msg = e instanceof Error ? e.message : '알 수 없는 오류';
+
+      if (msg === 'Database locked') {
+        showToast('세션이 만료되었습니다. 다시 로그인해주세요.', 'error');
+        handleLogout();
+      } else {
+        showToast(`저장에 실패했습니다: ${msg}`, 'error');
+      }
     }
   };
 
@@ -92,8 +101,16 @@ const App: React.FC = () => {
       dbService.deleteItem(id);
       refreshData();
       showToast('삭제되었습니다.', 'success');
-    } catch (e) {
-      showToast('삭제에 실패했습니다.', 'error');
+    } catch (e: any) {
+      console.error("Delete failed:", e);
+      const msg = e instanceof Error ? e.message : '알 수 없는 오류';
+
+      if (msg === 'Database locked') {
+        showToast('세션이 만료되었습니다. 다시 로그인해주세요.', 'error');
+        handleLogout();
+      } else {
+        showToast(`삭제에 실패했습니다: ${msg}`, 'error');
+      }
     }
   };
 
