@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { CredentialItem } from '../types';
 import { AUTH_TYPES } from '../constants';
-import { Copy, Eye, EyeOff, Edit2, Trash2, Calendar, ExternalLink, Hash, FileText } from 'lucide-react';
+import { Copy, Eye, EyeOff, Edit2, Trash2, Calendar, ExternalLink, Hash, FileText, AlertTriangle } from 'lucide-react';
+import Modal from './Modal';
 
 import { useToast } from '../context/ToastContext';
 
@@ -14,6 +15,7 @@ interface CredentialCardProps {
 const CredentialCard: React.FC<CredentialCardProps> = ({ item, onEdit, onDelete }) => {
   const { showToast } = useToast();
   const [revealedKeys, setRevealedKeys] = useState<Record<string, boolean>>({});
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
 
   const authType = AUTH_TYPES.find(t => t.id === item.authTypeId);
 
@@ -76,9 +78,7 @@ const CredentialCard: React.FC<CredentialCardProps> = ({ item, onEdit, onDelete 
             <Edit2 className="w-4 h-4" />
           </button>
           <button
-            onClick={() => {
-              if (window.confirm("이 자격증명을 삭제하시겠습니까?")) onDelete(item.id);
-            }}
+            onClick={() => setIsDeleteConfirmOpen(true)}
             className="p-2 text-gray-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
           >
             <Trash2 className="w-4 h-4" />
@@ -172,6 +172,38 @@ const CredentialCard: React.FC<CredentialCardProps> = ({ item, onEdit, onDelete 
           )}
         </div>
       )}
+
+      <Modal
+        isOpen={isDeleteConfirmOpen}
+        onClose={() => setIsDeleteConfirmOpen(false)}
+        title="자격증명 삭제 확인"
+      >
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 rounded-xl border border-rose-100 bg-rose-50 p-4">
+            <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0 text-rose-600" />
+            <p className="text-sm leading-relaxed text-rose-900">
+              이 자격증명을 삭제하면 복구할 수 없습니다.
+            </p>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => setIsDeleteConfirmOpen(false)}
+              className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50"
+            >
+              취소
+            </button>
+            <button
+              onClick={() => {
+                setIsDeleteConfirmOpen(false);
+                onDelete(item.id);
+              }}
+              className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-rose-500"
+            >
+              삭제
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };

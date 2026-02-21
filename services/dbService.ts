@@ -2,14 +2,11 @@ import { DB_KEY } from '../constants';
 import { CredentialItem, StoredDatabase } from '../types';
 import {
   decryptData,
-  decryptLegacyData,
   deriveKey,
-  deriveLegacyKeyCandidates,
   encryptData,
   generateSalt,
   hashPassword,
   isLegacyVerificationHash,
-  verifyLegacyPassword,
   verifyPassword
 } from './cryptoService';
 
@@ -123,96 +120,13 @@ export class DBService {
     if (!db) return null;
 
     if (isLegacyVerificationHash(db.verificationHash)) {
-      const valid = await verifyLegacyPassword(password, db.salt, db.verificationHash);
-      if (!valid) return null;
-
-      const legacyKeys = await deriveLegacyKeyCandidates(password, db.salt);
-
-      // Best effort auto-migration to modern format. If it fails, keep legacy mode so user is not locked out.
-      try {
-        return await this.migrateLegacyDatabase(password, db, legacyKeys);
-      } catch {
-        return this.findUsableLegacyKey(db, legacyKeys);
-      }
+      throw new Error("UnsupportedBackupFormat");
     }
 
     const valid = await verifyPassword(password, db.salt, db.verificationHash);
     if (!valid) return null;
 
     return deriveKey(password, db.salt);
-  }
-
-  private async findUsableLegacyKey(legacyDb: StoredDatabase, legacyKeys: string[]): Promise<string | null> {
-    if (legacyDb.items.length === 0) {
-      return legacyKeys[0] || null;
-    }
-
-    const sampleCiphertext = legacyDb.items[0]?.ciphertext;
-    if (!sampleCiphertext) {
-      return legacyKeys[0] || null;
-    }
-
-    for (const legacyKey of legacyKeys) {
-      const sample = await decryptLegacyData<CredentialItem>(sampleCiphertext, legacyKey);
-      if (sample) {
-        return legacyKey;
-      }
-    }
-
-    return null;
-  }
-
-  private async decryptLegacyItems(
-    legacyDb: StoredDatabase,
-    legacyKeys: string[]
-  ): Promise<CredentialItem[]> {
-    for (const legacyKey of legacyKeys) {
-      const decryptedItems: CredentialItem[] = [];
-      let failed = false;
-
-      for (const encryptedItem of legacyDb.items) {
-        const decrypted = await decryptLegacyData<CredentialItem>(encryptedItem.ciphertext, legacyKey);
-        if (!decrypted) {
-          failed = true;
-          break;
-        }
-        decryptedItems.push(decrypted);
-      }
-
-      if (!failed) {
-        return decryptedItems;
-      }
-    }
-
-    throw new Error('Legacy migration failed');
-  }
-
-  private async migrateLegacyDatabase(
-    password: string,
-    legacyDb: StoredDatabase,
-    legacyKeys: string[]
-  ): Promise<string> {
-    const decryptedItems = await this.decryptLegacyItems(legacyDb, legacyKeys);
-
-    const newSalt = generateSalt();
-    const newVerificationHash = await hashPassword(password, newSalt);
-    const newMasterKey = await deriveKey(password, newSalt);
-
-    const migratedItems = [];
-    for (const item of decryptedItems) {
-      const ciphertext = await encryptData(item, newMasterKey);
-      migratedItems.push({ id: item.id, ciphertext });
-    }
-
-    const migratedDb: StoredDatabase = {
-      version: 2,
-      verificationHash: newVerificationHash,
-      salt: newSalt,
-      items: migratedItems
-    };
-
-    await this.writeRawDatabase(JSON.stringify(migratedDb));
-    return newMasterKey;
   }
 
   // Get all items decrypted
@@ -287,24 +201,12 @@ export class DBService {
   }
 
   // Import database JSON from backup and overwrite current DB
-  async importData(raw: string, legacyPassword?: string): Promise<void> {
+  async importData(raw: string): Promise<void> {
     const db = this.parseDatabase(raw);
     if (!db) throw new Error("Invalid database format");
 
     if (isLegacyVerificationHash(db.verificationHash)) {
-      if (!legacyPassword) {
-        throw new Error("LegacyPasswordRequired");
-      }
-
-      const valid = await verifyLegacyPassword(legacyPassword, db.salt, db.verificationHash);
-      if (!valid) {
-        throw new Error("LegacyPasswordInvalid");
-      }
-
-      const legacyKeys = await deriveLegacyKeyCandidates(legacyPassword, db.salt);
-      await this.migrateLegacyDatabase(legacyPassword, db, legacyKeys);
-      this.masterKey = null;
-      return;
+      throw new Error("UnsupportedBackupFormat");
     }
 
     await this.writeRawDatabase(raw);

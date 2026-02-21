@@ -1,15 +1,26 @@
 import React, { useRef, useState } from 'react';
 import { dbService } from '../services/dbService';
-import { Download, Trash2, AlertOctagon, Upload, AlertTriangle } from 'lucide-react';
+import { Download, Trash2, AlertOctagon, Upload, AlertTriangle, Info, CheckCircle2 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import Modal from '../components/Modal';
+
+type PopupTone = 'info' | 'success' | 'error';
+
+interface PopupState {
+  title: string;
+  message: string;
+  tone: PopupTone;
+}
 
 const Settings: React.FC = () => {
   const { showToast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [isNukeModalOpen, setIsNukeModalOpen] = useState(false);
+  const [isImportConfirmOpen, setIsImportConfirmOpen] = useState(false);
   const [nukeConfirmText, setNukeConfirmText] = useState('');
+  const [pendingImportRaw, setPendingImportRaw] = useState<string | null>(null);
+  const [popup, setPopup] = useState<PopupState | null>(null);
 
   const handleExport = async () => {
     try {
@@ -24,8 +35,34 @@ const Settings: React.FC = () => {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
       showToast('데이터베이스 백업 파일이 생성되었습니다.', 'success');
-    } catch (e) {
+    } catch {
       showToast('백업 생성에 실패했습니다.', 'error');
+    }
+  };
+
+  const runImport = async (content: string) => {
+    try {
+      await dbService.importData(content);
+      setPopup({
+        title: '복원 완료',
+        message: '데이터를 성공적으로 가져왔습니다. 확인을 누르면 앱을 새로고침합니다.',
+        tone: 'success',
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message === 'UnsupportedBackupFormat') {
+        setPopup({
+          title: '지원되지 않는 형식입니다.',
+          message: '1.0.1 백업은 더 이상 앱 내 변환을 지원하지 않습니다. 1.0.2 백업(JSON)만 불러올 수 있습니다.',
+          tone: 'error',
+        });
+        return;
+      }
+
+      setPopup({
+        title: '복원 실패',
+        message: '잘못된 파일 형식이거나 손상된 파일입니다.',
+        tone: 'info',
+      });
     }
   };
 
@@ -33,44 +70,12 @@ const Settings: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!window.confirm("경고: 가져오기를 진행하면 현재 저장된 모든 데이터가 삭제되고 파일 내용으로 덮어씌워집니다. 계속하시겠습니까?")) {
-      return;
-    }
-
     const reader = new FileReader();
-    reader.onload = async (event) => {
+    reader.onload = (event) => {
       const content = event.target?.result as string;
-
-      try {
-        await dbService.importData(content);
-        showToast('데이터를 성공적으로 가져왔습니다. 다시 로그인해주세요.', 'success');
-        setTimeout(() => window.location.reload(), 1500);
-      } catch (error) {
-        if (error instanceof Error && error.message === 'LegacyPasswordRequired') {
-          const legacyPassword = window.prompt(
-            '1.0.1 백업 파일입니다.\n해당 백업의 마스터 비밀번호를 입력하면 1.0.2 형식으로 변환해 복원합니다.'
-          );
-
-          if (!legacyPassword) {
-            showToast('복원을 취소했습니다.', 'info');
-            return;
-          }
-
-          try {
-            await dbService.importData(content, legacyPassword);
-            showToast('레거시 백업을 변환해 복원했습니다. 다시 로그인해주세요.', 'success');
-            setTimeout(() => window.location.reload(), 1500);
-            return;
-          } catch (legacyError) {
-            if (legacyError instanceof Error && legacyError.message === 'LegacyPasswordInvalid') {
-              showToast('백업 마스터 비밀번호가 올바르지 않습니다.', 'error');
-              return;
-            }
-          }
-        }
-
-        showToast('잘못된 파일 형식이거나 손상된 파일입니다.', 'error');
-      }
+      setPendingImportRaw(content);
+      setIsImportConfirmOpen(true);
+      e.target.value = '';
     };
     reader.readAsText(file);
   };
@@ -97,7 +102,6 @@ const Settings: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 gap-6">
-        {/* Export Section */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
           <div className="flex items-start gap-4">
             <div className="p-3 bg-blue-50 rounded-lg">
@@ -118,7 +122,6 @@ const Settings: React.FC = () => {
           </div>
         </div>
 
-        {/* Import Section - Color changed to Orange to indicate caution */}
         <div className="bg-white rounded-xl shadow-sm border border-orange-100 p-6">
           <div className="flex items-start gap-4">
             <div className="p-3 bg-orange-50 rounded-lg">
@@ -149,7 +152,6 @@ const Settings: React.FC = () => {
           </div>
         </div>
 
-        {/* Nuke Section */}
         <div className="bg-red-50 rounded-xl shadow-sm border border-red-100 p-6">
           <div className="flex items-start gap-4">
             <div className="p-3 bg-red-100 rounded-lg">
@@ -171,7 +173,46 @@ const Settings: React.FC = () => {
         </div>
       </div>
 
-      {/* Confirmation Modal */}
+      <Modal
+        isOpen={isImportConfirmOpen}
+        onClose={() => {
+          setIsImportConfirmOpen(false);
+          setPendingImportRaw(null);
+        }}
+        title="백업 복원 확인"
+      >
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 rounded-xl border border-amber-100 bg-amber-50 p-4">
+            <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-600" />
+            <p className="text-sm leading-relaxed text-amber-900">
+              현재 데이터가 모두 삭제되고 선택한 백업으로 교체됩니다. 계속 진행할까요?
+            </p>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => {
+                setIsImportConfirmOpen(false);
+                setPendingImportRaw(null);
+              }}
+              className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50"
+            >
+              취소
+            </button>
+            <button
+              onClick={() => {
+                if (!pendingImportRaw) return;
+                setIsImportConfirmOpen(false);
+                void runImport(pendingImportRaw);
+                setPendingImportRaw(null);
+              }}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-500"
+            >
+              복원 진행
+            </button>
+          </div>
+        </div>
+      </Modal>
+
       <Modal
         isOpen={isNukeModalOpen}
         onClose={() => setIsNukeModalOpen(false)}
@@ -210,13 +251,55 @@ const Settings: React.FC = () => {
             <button
               onClick={confirmNuke}
               disabled={nukeConfirmText !== '삭제'}
-              className={`px-4 py-2 rounded-lg font-medium transition-all shadow-sm flex items-center gap-2
-                        ${nukeConfirmText === '삭제'
+              className={`px-4 py-2 rounded-lg font-medium transition-all shadow-sm flex items-center gap-2 ${nukeConfirmText === '삭제'
                   ? 'bg-red-600 hover:bg-red-700 text-white'
-                  : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
+                  : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                }`}
             >
               <Trash2 className="w-4 h-4" />
               삭제 실행
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={!!popup}
+        onClose={() => {
+          const shouldReload = popup?.tone === 'success';
+          setPopup(null);
+          if (shouldReload) {
+            setTimeout(() => window.location.reload(), 200);
+          }
+        }}
+        title={popup?.title || ''}
+      >
+        <div className="space-y-4">
+          <div
+            className={`flex items-start gap-3 rounded-xl border p-4 ${popup?.tone === 'success'
+                ? 'border-emerald-100 bg-emerald-50 text-emerald-900'
+                : popup?.tone === 'error'
+                  ? 'border-rose-100 bg-rose-50 text-rose-900'
+                  : 'border-blue-100 bg-blue-50 text-blue-900'
+              }`}
+          >
+            {popup?.tone === 'success' && <CheckCircle2 className="mt-0.5 h-5 w-5 flex-shrink-0 text-emerald-600" />}
+            {popup?.tone === 'error' && <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0 text-rose-600" />}
+            {popup?.tone === 'info' && <Info className="mt-0.5 h-5 w-5 flex-shrink-0 text-blue-600" />}
+            <p className="text-sm leading-relaxed">{popup?.message}</p>
+          </div>
+          <div className="flex justify-end">
+            <button
+              onClick={() => {
+                const shouldReload = popup?.tone === 'success';
+                setPopup(null);
+                if (shouldReload) {
+                  setTimeout(() => window.location.reload(), 200);
+                }
+              }}
+              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-slate-700"
+            >
+              확인
             </button>
           </div>
         </div>

@@ -9,7 +9,6 @@
   "scripts": {
     "dev": "vite",
     "icons:generate": "node scripts/generate-icons.js",
-    "migrate:101-to-102": "node scripts/migrate-db-101-to-102.js",
     "build": "npm run icons:generate && tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",

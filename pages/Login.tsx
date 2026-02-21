@@ -1,9 +1,18 @@
-﻿import React, { useEffect, useRef, useState } from 'react';
-import { Shield, Unlock, KeyRound, AlertCircle } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Shield, Unlock, KeyRound, AlertCircle, AlertTriangle, CheckCircle2, Info } from 'lucide-react';
 import { dbService } from '../services/dbService';
+import Modal from '../components/Modal';
 
 interface LoginProps {
   onLogin: (derivedKey: string) => Promise<void>;
+}
+
+type PopupTone = 'info' | 'success' | 'error';
+
+interface PopupState {
+  title: string;
+  message: string;
+  tone: PopupTone;
 }
 
 const Login: React.FC<LoginProps> = ({ onLogin }) => {
@@ -11,8 +20,14 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [shake, setShake] = useState(false);
+  const [isImportConfirmOpen, setIsImportConfirmOpen] = useState(false);
+  const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
+  const [pendingImportRaw, setPendingImportRaw] = useState<string | null>(null);
+  const [popup, setPopup] = useState<PopupState | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const passwordInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -33,6 +48,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   }, []);
 
   const showInvalidPassword = () => {
+    setNotice('');
     setError('비밀번호가 올바르지 않습니다.');
     setShake(true);
     setTimeout(() => setShake(false), 500);
@@ -41,6 +57,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setNotice('');
 
     try {
       if (isSetup) {
@@ -64,10 +81,51 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
       }
 
       await onLogin(derivedKey);
-    } catch {
+    } catch (caught) {
+      if (caught instanceof Error && caught.message === 'UnsupportedBackupFormat') {
+        setPopup({
+          title: '지원되지 않는 형식입니다.',
+          message: '현재 DB는 지원되지 않는 레거시 형식입니다. 1.0.2에서 생성된 백업 파일을 사용해주세요.',
+          tone: 'error',
+        });
+        return;
+      }
+
       setError('로그인 처리 중 문제가 발생했습니다. 다시 시도해주세요.');
       setShake(true);
       setTimeout(() => setShake(false), 500);
+    }
+  };
+
+  const runImport = async (content: string) => {
+    try {
+      await dbService.importData(content);
+      setIsSetup(false);
+      setPassword('');
+      setConfirmPassword('');
+      setError('');
+      setNotice('복원이 완료되었습니다. 마스터 비밀번호를 입력해 로그인하세요.');
+      setTimeout(() => passwordInputRef.current?.focus(), 0);
+      setPopup({
+        title: '복원 완료',
+        message: '백업 파일을 정상적으로 복원했습니다.',
+        tone: 'success',
+      });
+    } catch (caught) {
+      if (caught instanceof Error && caught.message === 'UnsupportedBackupFormat') {
+        setPopup({
+          title: '지원되지 않는 형식입니다.',
+          message: '1.0.1 백업은 더 이상 앱 내 변환을 지원하지 않습니다. 1.0.2 백업(JSON)만 불러올 수 있습니다.',
+          tone: 'error',
+        });
+        return;
+      }
+
+      setPopup({
+        title: '복원 실패',
+        message: '잘못된 백업 파일이거나 복원 중 오류가 발생했습니다.',
+        tone: 'info',
+      });
     }
   };
 
@@ -75,51 +133,18 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!isSetup) {
-      const shouldContinue = window.confirm(
-        '경고: 백업 파일을 불러오면 현재 기기에 저장된 모든 데이터가 삭제되고 덮어씌워집니다.\n\n계속하시겠습니까?'
-      );
-
-      if (!shouldContinue) {
-        e.target.value = '';
-        return;
-      }
-    }
-
     const reader = new FileReader();
     reader.onload = async (event) => {
       const content = event.target?.result as string;
 
-      try {
-        await dbService.importData(content);
-        alert('복원되었습니다. 마스터 비밀번호로 로그인해주세요.');
-        window.location.reload();
-      } catch (error) {
-        if (error instanceof Error && error.message === 'LegacyPasswordRequired') {
-          const legacyPassword = window.prompt(
-            '1.0.1 백업 파일입니다.\n해당 백업의 마스터 비밀번호를 입력하면 1.0.2 형식으로 변환해 복원합니다.'
-          );
-
-          if (!legacyPassword) {
-            alert('복원이 취소되었습니다.');
-            return;
-          }
-
-          try {
-            await dbService.importData(content, legacyPassword);
-            alert('레거시 백업을 변환해 복원했습니다. 마스터 비밀번호로 로그인해주세요.');
-            window.location.reload();
-            return;
-          } catch (legacyError) {
-            if (legacyError instanceof Error && legacyError.message === 'LegacyPasswordInvalid') {
-              alert('백업 마스터 비밀번호가 올바르지 않습니다.');
-              return;
-            }
-          }
-        }
-
-        alert('잘못된 백업 파일이거나 복원 중 오류가 발생했습니다.');
+      if (!isSetup) {
+        setPendingImportRaw(content);
+        setIsImportConfirmOpen(true);
+      } else {
+        await runImport(content);
       }
+
+      e.target.value = '';
     };
 
     reader.readAsText(file);
@@ -152,6 +177,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                 placeholder="마스터 비밀번호"
                 className="w-full bg-slate-900 border border-slate-600 text-white px-4 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-slate-500 transition-all"
                 autoFocus
+                ref={passwordInputRef}
               />
             </div>
           </div>
@@ -174,6 +200,12 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
             <div className="flex items-center space-x-2 text-red-400 bg-red-400/10 p-3 rounded-lg text-sm">
               <AlertCircle className="w-4 h-4" />
               <span>{error}</span>
+            </div>
+          )}
+
+          {notice && (
+            <div className="text-sm text-emerald-300 bg-emerald-500/10 p-3 rounded-lg border border-emerald-500/20">
+              {notice}
             </div>
           )}
 
@@ -215,15 +247,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
           {!isSetup && (
             <button
-              onClick={() => {
-                const shouldReset = window.confirm('모든 데이터가 삭제됩니다. 정말로 초기화하시겠습니까?');
-                if (!shouldReset) return;
-
-                void (async () => {
-                  await dbService.clearDatabase();
-                  window.location.reload();
-                })();
-              }}
+              onClick={() => setIsResetConfirmOpen(true)}
               className="mt-2 text-xs text-slate-500 hover:text-red-400 transition-colors w-full py-2"
             >
               데이터 초기화 (전체 삭제)
@@ -231,6 +255,111 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
           )}
         </div>
       </div>
+
+      <Modal
+        isOpen={isImportConfirmOpen}
+        onClose={() => {
+          setIsImportConfirmOpen(false);
+          setPendingImportRaw(null);
+        }}
+        title="백업 복원 확인"
+      >
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 rounded-xl border border-amber-100 bg-amber-50 p-4">
+            <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-600" />
+            <p className="text-sm leading-relaxed text-amber-900">
+              복원을 진행하면 현재 저장된 모든 데이터가 삭제되고, 선택한 백업 내용으로 덮어씌워집니다.
+            </p>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => {
+                setIsImportConfirmOpen(false);
+                setPendingImportRaw(null);
+              }}
+              className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50"
+            >
+              취소
+            </button>
+            <button
+              onClick={() => {
+                if (!pendingImportRaw) return;
+                setIsImportConfirmOpen(false);
+                void runImport(pendingImportRaw);
+                setPendingImportRaw(null);
+              }}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-500"
+            >
+              복원 진행
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={isResetConfirmOpen}
+        onClose={() => setIsResetConfirmOpen(false)}
+        title="데이터 초기화 확인"
+      >
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 rounded-xl border border-rose-100 bg-rose-50 p-4">
+            <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0 text-rose-600" />
+            <p className="text-sm leading-relaxed text-rose-900">
+              모든 데이터가 영구적으로 삭제됩니다. 이 작업은 되돌릴 수 없습니다.
+            </p>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => setIsResetConfirmOpen(false)}
+              className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50"
+            >
+              취소
+            </button>
+            <button
+              onClick={() => {
+                setIsResetConfirmOpen(false);
+                void (async () => {
+                  await dbService.clearDatabase();
+                  window.location.reload();
+                })();
+              }}
+              className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-rose-500"
+            >
+              초기화
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={!!popup}
+        onClose={() => setPopup(null)}
+        title={popup?.title || ''}
+      >
+        <div className="space-y-4">
+          <div
+            className={`flex items-start gap-3 rounded-xl border p-4 ${popup?.tone === 'success'
+                ? 'border-emerald-100 bg-emerald-50 text-emerald-900'
+                : popup?.tone === 'error'
+                  ? 'border-rose-100 bg-rose-50 text-rose-900'
+                  : 'border-blue-100 bg-blue-50 text-blue-900'
+              }`}
+          >
+            {popup?.tone === 'success' && <CheckCircle2 className="mt-0.5 h-5 w-5 flex-shrink-0 text-emerald-600" />}
+            {popup?.tone === 'error' && <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0 text-rose-600" />}
+            {popup?.tone === 'info' && <Info className="mt-0.5 h-5 w-5 flex-shrink-0 text-blue-600" />}
+            <p className="text-sm leading-relaxed">{popup?.message}</p>
+          </div>
+          <div className="flex justify-end">
+            <button
+              onClick={() => setPopup(null)}
+              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-slate-700"
+            >
+              확인
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       <style>{`
         @keyframes shake {

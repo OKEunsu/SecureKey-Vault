@@ -39,4 +39,7 @@ if ($LASTEXITCODE -ne 0) {
 # 3) Build installer from prepackaged app so patched icon is preserved.
 npx electron-builder --prepackaged release/win-unpacked --win nsis --config.win.signAndEditExecutable=false
 
-Write-Host "Windows packaging completed with patched icon."
+# 4) Build portable EXE for test distribution.
+npx electron-builder --prepackaged release/win-unpacked --win portable --config.win.signAndEditExecutable=false
+
+Write-Host "Windows packaging completed (nsis + portable) with patched icon."
